@@ -1,0 +1,173 @@
+---
+title: "Regression Models - MPG of Manual vs. Auto in the MTCARS dataset"
+author: "Michael Bien"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    fig_caption: yes 
+    keep_md: yes
+---
+
+# Executive Summary
+In the analysis below, I examine the MTCARS dataset to determine the relationship between a manual transmission and MPG.  Specifically, I answer these two questions: 
+
+1. "Is an automatic or manual better for MPG?"
+2. "Quantify the MPG difference between automatic and manual transmissions."
+
+**Conclusion**
+
+While the initial observational summary shows that cars with a manual transmission get better MPG (+7.2 MPG for manual), a multivariate model reveals a more complex relationship, when considering other explanatory variables like a vehicle's weight.  **Ultimately, I conclude that an manual transmission gets slightly worse MPG (-.02MPG for manual) when controlling for the vehicle's weight.**
+
+**Methodology**
+As shown below, first, I consider whether the fits a normal distribution.  Second, perform EDA to explore the relationships between key variables, and identify potential predictor variables.  Then, I build several models considering the effect of a manual transmission on MPG.  I build the following 4 models, and then choose the second model based on results from the ANOVA function, Variance Inflation results, and model performance (R squared) metrics.
+
+1. Model1: mpg ~ transmission  
+**2. Model2: mpg ~ wt + transmission  **  **<- Selected for low p value, low VIF, and high R^2 **
+3. Model3: mpg ~ wt * transmission  
+4. Model4: mpg ~ wt + transmission + disp + hp  
+
+## Setup
+Start by setting (echo = TRUE) and declaring libraries to be used
+```{r setup, include=TRUE, message=FALSE, cache = TRUE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE)  #"always use echo = TRUE" for this assignment, per notes
+library(ggplot2)
+library(regclass)
+library(Hmisc)
+```
+
+## Data Import and Cleaning
+
+In this section, I import the data and ensure that it follows a normal distribution so that lm() can be used.
+
+```{r data_step, cache = TRUE, message=FALSE}
+data(mtcars)
+#str(mtcars)
+## mpg, transmission, and several other potential variables
+
+  ###########################################################
+  ###                  Recode as factors                  ###
+  ###########################################################
+  mtcars$transmission <- as.factor(ifelse(mtcars$am == 0, "automatic", "manual"))
+  mtcars$cyl <- as.factor(mtcars$cyl)
+  mtcars$vs <- as.factor(mtcars$vs)
+
+
+#crosstable to confirm
+  with(mtcars, table(am, transmission))
+  
+  ###########################################################
+  ###             Are the residuals normal?               ###
+  ###########################################################
+  
+  qqnorm(mtcars$mpg, pch=1, main="QQPLOT of mtcars$mpg")
+  #linear model is appropriate for this case
+
+```
+
+## Exploratory data analysis
+
+In this section, I create a boxplot of MPG by manual vs. automatic, noting that manual gets better mileage; however, faceting by weight, this effect diminishes.
+
+```{r EDA, cache = TRUE, message=FALSE}
+
+  ###########################################################
+  ###             Exploratory Data Analysis               ###
+  ###########################################################
+  
+  
+  # 1 way look - MPG of manual vs. auto
+  # Average MPG: 17 for automatic, 24 for manual
+  round(tapply(mtcars$mpg, mtcars$transmission, mean),1)
+  
+  #In this plot, we note that manual cars often get better MPG
+
+  ggplot(data=mtcars, aes(x=transmission, y=mpg)) + 
+    geom_boxplot()+
+    geom_jitter() + 
+    ggtitle("MPG of auto vs. manual")
+  
+  # #facet plots to examine average MPG within other variables
+  # 
+  # ggplot(data=mtcars, aes(x=transmission, y=mpg)) + 
+  #   geom_boxplot()+
+  #   facet_wrap(~cyl)
+
+#cut the weight variable
+  summary(mtcars$wt)
+  #hist(mtcars$wt)
+  #Cut the weight variable into 5 groups
+  mtcars$weight_group <- cut(mtcars$wt, 5)
+  #summary(mtcars$weight_group)
+  
+  #In this plot, we note that, when controlling for weight, automatic and manual perform similarly
+  
+  ggplot(data=mtcars, aes(x=transmission, y=mpg)) + 
+    geom_boxplot()+
+    facet_wrap(~weight_group) + 
+    geom_jitter() + 
+    ggtitle("MPG of auto vs. manual by weight")
+  
+  vars_to_drop <- c("am", "drat","displ", "qsec", "vs", "gear", "carb", "weight_group", "cyl")
+  mtcars2 <- mtcars[,!names(mtcars) %in% vars_to_drop]
+  
+  pairs(mpg  ~ . , mtcars2)
+
+```
+  
+  
+## Model Fitting 
+
+In this section, I fit several models and, using ANOVA, VIF, and R squared as metrics, select a model
+
+```{r model_fitting_step, cache = TRUE, message=FALSE}
+
+  # manual by itself
+  model1 <- lm(mpg ~ transmission, mtcars2)
+  summary(model1)$coefficients
+  
+  #slightly negative when we take into account weight
+  model2 <- lm(mpg ~ wt + transmission, mtcars2)
+  model3 <- lm(mpg ~ wt * transmission, mtcars2)
+  model4 <- lm(mpg ~ wt + transmission + disp + hp, mtcars2)
+
+  ###########################################################
+  ###             Model Selection, including VIF          ###
+  ###########################################################  
+  
+  anova(model1, model2, model3, model4)
+  
+  #Based on the ANOVA above, models 3 and 2 are potential predictors based on their p values; model 4 is excluded
+
+  summary(model1)$r.squared
+  summary(model2)$r.squared
+  summary(model3)$r.squared
+  
+  VIF(model2)
+  VIF(model3)
+  
+  #Model 3 has 2 high a VIF to be considered; model 2 is selected
+  
+  summary(model2)$coefficients
+  initial_coef <- summary(model1)$coefficients
+  final_coefs <- summary(model2)$coefficients
+  
+  #Since anova excludes model 4 and VIF excludes model 3, I note that model 2 yields a parsimonious and trustworthy model.
+
+
+```
+
+However, it should be pointed out that there is some uncertainty here, as the R^2 of .75 only explains 75% of the variance.
+
+
+## Residuals
+
+Finally, I look at the model fit residuals to ensure our fit was appropriate and see no major issues.
+
+```{r residuals, cache = TRUE, message=FALSE}
+par(mfrow=c(2,2))    # set the plotting area into a 2*2 array
+plot(model2)
+
+
+```
+
+Final model coefficients: `r final_coefs`
